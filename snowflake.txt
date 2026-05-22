@@ -1,0 +1,96 @@
+CREATE OR REPLACE DATABASE weather_db;
+SHOW DATABASES;
+USE DATABASE WEATHER_DB;
+
+create or replace WAREHOUSE weather_wh 
+WITH
+WAREHOUSE_SIZE="XSMALL"
+AUTO_SUSPEND = 300
+AUTO_RESUME = TRUE;
+
+USE WAREHOUSE weather_wh;
+
+create schema weatherschema;
+use schema weatherschema;
+
+
+CREATE OR REPLACE TABLE weather_table (
+    city STRING,
+    temperature FLOAT,
+    humidity FLOAT,
+    condition STRING,
+    timestamp TIMESTAMP_NTZ
+);
+
+CREATE OR REPLACE STORAGE INTEGRATION s3_int
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'S3'
+  ENABLED = TRUE
+  STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::000000000000:role/temp_role' -- dummy arn
+  STORAGE_ALLOWED_LOCATIONS = ('s3://weather-storage123/');
+
+  desc integration s3_int;
+  -- og arn
+ALTER STORAGE INTEGRATION s3_int 
+SET STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::452413083470:role/snowflake_s3_role';
+
+
+CREATE OR REPLACE STAGE weather_stage
+  URL = 's3://weather-storage123/'
+  CREDENTIALS = (
+    AWS_KEY_ID = 'AWS_ID' 
+    AWS_SECRET_KEY = 'SECRET_KEY'
+  );
+  
+SELECT * FROM WEATHER_TABLE;
+
+
+show pipes;
+
+
+
+
+select $2 from @weather_stage;
+
+
+
+
+select $1 from @weather_stage limit1;
+
+LS @WEATHER_STAGE;
+
+ALTER TABLE weather_table ADD COLUMN IF NOT EXISTS humidity FLOAT;
+ALTER TABLE weather_table ADD COLUMN IF NOT EXISTS condition STRING;
+
+
+
+CREATE OR REPLACE PIPE weather_pipe
+  AUTO_INGEST = TRUE
+AS
+COPY INTO weather_table
+FROM (
+  SELECT 
+    $1:city::string,
+    $1:temperature::float,
+    $1:humidity::float,    
+    $1:condition::string,   
+    $1:timestamp::timestamp_ntz
+  FROM @weather_stage
+)
+FILE_FORMAT = (TYPE = 'JSON');
+
+list @weather_stage;
+
+select system$pipe_status('weather_pipe');
+
+truncate table weather_table;
+
+
+SELECT * FROM weather_table 
+WHERE humidity IS NOT NULL 
+ORDER BY timestamp DESC;
+show pipes;
+
+
+ALTER PIPE weather_pipe REFRESH;
+select * from weather_table;
